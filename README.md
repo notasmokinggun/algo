@@ -1,12 +1,34 @@
 # Nifty Alpha Swing Scanner
 
-**Regime-adaptive NSE equity scanner · Sharpe 2.05 · Max DD -10.6% · 16.2% ann. return · 10-year backtest**
+**Two NSE swing strategies, one live universe pipeline · Built over 2 months · 6 versions**
 
-Built over roughly 2 months. The first four versions came in 10 days -- rapid iteration, daily releases, figure out what it is. The next two versions (v5 and v6) took 50 days -- slower, more deliberate, and where everything that actually matters was built.
+The repo contains two independent trading systems and the scraper that feeds both of them.
 
 ---
 
-## Backtest Results (v6.0.0 · 10 years · 154 tickers · 14 sectors)
+## Files
+
+### `scanner.py` -- Regime-Adaptive Swing Scanner (primary)
+
+The main system. A fully autonomous NSE swing scanner built around a continuous market regime intensity engine. 5,900 lines, 6 major versions, 10-year backtest.
+
+### `swingscanner.py` -- V20 Zone Scanner (second strategy)
+
+A separate, structurally different scanner implementing the V20 strategy. Identifies stocks that have formed a "zone" -- a continuous green-candle rally of 20-80% -- and enters at the zone low when price retouches it, targeting the zone high. No stop loss. One averaging leg allowed per stock (max 6% exposure). SQLite price cache, walk-forward validation, chart outputs.
+
+### `universe.py` -- Live Universe Scraper
+
+Logs into screener.in with a free account and scrapes the V200 quality screen (D/E < 0.25, ROCE > 20%, Net Profit > Rs200cr) across all pages, producing `universe.txt`. Both scanners read from this file when running in live mode. Anonymous access returns only page 1 (25 names) -- login is required for the full list.
+
+```bash
+python universe.py                          # scrape today's V200 list
+python scanner.py universe.txt             # live scan on quality-screened names
+python swingscanner.py --universe-file universe.txt   # V20 scan on same names
+```
+
+---
+
+## scanner.py -- Backtest Results (v6.0.0 · 10 years · 154 tickers · 14 sectors)
 
 | Metric | Scanner | Nifty TR | Blended Benchmark |
 |---|---|---|---|
@@ -24,7 +46,7 @@ Slippage: 0.30%/leg · Transaction cost: 0.20%/leg · RS scores computed lookahe
 
 ---
 
-## Walk-Forward Validation
+## scanner.py -- Walk-Forward Validation
 
 | Fold | Period | Trades | Win% | Sharpe | Max DD | Ann. Return | Nifty Ann. | Alpha |
 |---|---|---|---|---|---|---|---|---|
@@ -36,7 +58,7 @@ Fold 3 is live / forward. Alpha held positive (+10.2%) in a year where Nifty ret
 
 ---
 
-## Architecture
+## scanner.py -- Architecture
 
 ### Regime Engine (continuous intensity, not a label)
 
@@ -124,25 +146,25 @@ REGIME_FILTERS = {
 }
 ```
 
-Regime was determined by EMA crossover -- one bar you're in "bull", the next bar you're in "bear". Every parameter snapped instantly to its new value.
+Regime was determined by EMA crossover -- one bar you're in "bull", next bar you're in "bear". Every parameter snapped instantly to its new value.
 
-Fundamentals at this stage: a manually annotated `REV_GROWTH` dict with `True/False` per ticker, updated by hand. INDUSINDBK, IIFL, LAURUSLABS, GRANULES, MANYAVAR all marked `False`. It worked, but it meant running the scanner required manually checking quarterly results and editing the file.
+Fundamentals at this stage: a manually annotated `REV_GROWTH` dict with `True/False` per ticker, updated by hand. It worked, but running the scanner meant checking quarterly results and editing the file after each earnings season.
 
 Universe: 11 sectors, ~130 tickers. Backtest: 3 years.
 
-This was the version where it became clear the system had real potential -- and also where the problems with binary regime labels became obvious enough to fix properly.
+This was the version where the problems with binary regime labels became obvious enough to fix properly.
 
 ### v5.x -- The slow 50 days
 
-The decision to replace binary regime labels with a continuous intensity float. The three lookup tables collapsed into one `_ANCHORS` dict with (bear_value, bull_value) pairs, and `_interp()` evaluates each parameter smoothly at the current intensity. A regime "flip" no longer exists -- the system always sits somewhere on a continuous spectrum.
+The decision to replace binary regime labels with a continuous intensity float. The three lookup tables collapsed into one `_ANCHORS` dict with (bear_value, bull_value) pairs, and `_interp()` evaluates each parameter smoothly at the current intensity. A regime flip no longer exists -- the system always sits somewhere on a continuous spectrum.
 
-Everything else that came with v5.x:
+Everything else in v5.x:
 
 - 3 signal paths (Oversold Pullback, Trend Resumption, Bear Survivor/Capitulation)
 - NIFTYBEES ETF sleeve as a passive allocation component
 - Liquid fund accrual modelled at 6% p.a.
 - Dynamic capital allocation curve
-- The hardcoded `REV_GROWTH` dict replaced by a live yfinance fundamental cache (90-day TTL)
+- The hardcoded REV_GROWTH dict replaced by a live yfinance fundamental cache (90-day TTL)
 - Universe grew to 154 tickers across 14 sectors
 - Backtest extended from 3 years to 10 years
 
@@ -152,13 +174,13 @@ Critical bugs found and fixed during v5.x, all discovered by running the system 
 
 **v5.8.4:** `is_exceptional_tier()` always returned False in backtest. Root cause: the function received a float intensity from the backtest loop but its first guard compared against the string `"bear"`. A float never equals a string -- exceptional tier was structurally dead in all 10 years of backtest history without ever throwing an error. Fixed by accepting both str and float inputs.
 
-**v5.8.5:** Bear Survivor RS gate was trivially True once gate 1 passed. The OR logic on gate 2 made it unreachable as a fallback. Fixed to require top RS level OR accelerating RS trend -- both genuinely reachable.
+**v5.8.5:** Bear Survivor RS gate was trivially True once gate 1 passed. The OR logic on gate 2 made it unreachable as a fallback. Fixed so that top RS level OR accelerating RS trend are both genuinely reachable paths.
 
 ### v6.0 -- Exceptional Tier, Universe Modes, Diagnostic Engine
 
-**Exceptional Tier:** 4th signal path, bear-only. A stock must pass all Bear Survivor gates plus 5 independent high-conviction gates: elite RS percentile, genuine buying volume, score ceiling, controlled ATR. If all pass, the position receives bull-mode sizing in a bear market. In a broad selloff, the stocks genuinely being accumulated deserve larger positions, not smaller ones.
+**Exceptional Tier:** 4th signal path, bear-only. A stock must pass all Bear Survivor gates plus 5 independent high-conviction gates: elite RS percentile, genuine buying volume, score ceiling, controlled ATR. If all pass, the position receives bull-mode sizing in a bear market. In a broad selloff, stocks being genuinely accumulated deserve larger positions, not smaller ones.
 
-**Universe modes:** HARDCODED (fixed curated list, no survivorship bias, use for backtests) and VARIABLE (quality-screened from screener.in, use for live scanning). The separation matters -- backtesting on a list of "stocks that survived to today" inflates returns.
+**Universe modes:** HARDCODED (fixed curated list, no survivorship bias, use for backtests) and VARIABLE (quality-screened from screener.in via universe.py, use for live scanning). The separation matters -- backtesting on a list of stocks that survived to today inflates returns.
 
 **Diagnostic mode:** `python scanner.py diagnose TICKER.NS` runs a full per-ticker explainability pass and writes a markdown report with gate-by-gate breakdown, distance to threshold, scoring, position sizing, and a near-miss leaderboard of the closest non-triggering stocks across the universe.
 
@@ -169,24 +191,30 @@ Critical bugs found and fixed during v5.x, all discovered by running the system 
 ## Usage
 
 ```bash
-# Live scan (hardcoded universe)
+# Scrape today's quality-screened universe from screener.in
+python universe.py
+
+# Regime-adaptive scan (hardcoded curated universe)
 python scanner.py
 
-# Live scan (screened V200 universe)
+# Regime-adaptive scan (live quality-screened universe)
 python scanner.py universe.txt
 
-# Diagnostic mode
-python scanner.py diagnose MARICO.NS
+# V20 zone scan (live quality-screened universe)
+python swingscanner.py --universe-file universe.txt
 
-# Diagnostic without near-miss leaderboard
-python scanner.py diagnose MARICO.NS --no-near-misses
+# V20 with backtest and walk-forward
+python swingscanner.py --backtest --walkforward --start 2018-01-01
+
+# Diagnostic mode -- full explainability for one ticker
+python scanner.py diagnose MARICO.NS
 ```
 
 ---
 
 ## Stack
 
-Python · yfinance · pandas · numpy · matplotlib
+Python · yfinance · pandas · numpy · matplotlib · sqlite3 (stdlib)
 
 No ML. No external data vendor. All signals derived from price, volume, and fundamental data via Yahoo Finance, with a 90-day fundamental cache to stay within rate limits.
 
@@ -194,7 +222,7 @@ No ML. No external data vendor. All signals derived from price, volume, and fund
 
 ## Caveats
 
-- HARDCODED universe contains currently listed stocks only -- survivorship bias applies. Use VARIABLE mode with a point-in-time screen for production.
+- HARDCODED universe in scanner.py contains currently listed stocks only -- survivorship bias applies. Use VARIABLE mode with universe.py for live scanning.
 - yfinance fundamental coverage on NSE is patchy. Some tickers return None and are dropped from quality screens.
 - Walk-forward fold 3 (Jun 2025 - Jun 2026) is forward / live. Treat with appropriate scepticism.
 - Personal research project. Not financial advice.

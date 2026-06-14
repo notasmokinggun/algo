@@ -61,15 +61,12 @@ except Exception:
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  YOUR SCREENER.IN LOGIN  —  paste your FREE account credentials here once
-#  so you don't have to set env vars each run.
+#  
 #
-#  ⚠️  SECURITY: this is PLAINTEXT. Do NOT commit this file to git or share
-#      this copy. If you'd rather not hardcode it, leave these blank and use
-#      env vars (SCREENER_EMAIL / SCREENER_PASSWORD) or --email/--password.
+#  ENV VARS ENABLED
 # ══════════════════════════════════════════════════════════════════════
-MY_EMAIL    = "uditgandhi5508@gmail.com"        # e.g. "you@example.com"
-MY_PASSWORD = "$Udit2104$"        # e.g. "your-password"
+MY_EMAIL    = ""        # e.g. "you@example.com"
+MY_PASSWORD = ""        # e.g. "your-password"
 
 
 DEFAULT_SCREEN = ("https://www.screener.in/screens/1021245/"
